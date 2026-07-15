@@ -168,7 +168,7 @@ namespace Jellyfin.Plugin.AutoCollections
         public static Plugin Instance { get; private set; }        public override string Description
             => "Enables creation of Auto Collections based on simple criteria or advanced boolean expressions with custom collection names";        
         
-        private readonly Guid _id = new Guid("06ebf4a9-1326-4327-968d-8da00e1ea2eb");
+        private readonly Guid _id = new Guid("45728cd1-8334-4d13-a046-71bc87a0a37e");
         public override Guid Id => _id;
 
         public IEnumerable<PluginPageInfo> GetPages()

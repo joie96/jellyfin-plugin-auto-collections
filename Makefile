@@ -1,4 +1,4 @@
-export VERSION := 0.0.4.2
+export VERSION := 0.0.4.3
 export GITHUB_REPO := joie96/jellyfin-plugin-auto-collections
 export FILE := auto-collections-${VERSION}.zip
 
