@@ -75,6 +75,15 @@ namespace Jellyfin.Plugin.AutoCollections.Configuration
         Series = 2   // Only include TV series
     }
 
+    // Display/metadata type for collection rendering and sorting
+    public enum CollectionType
+    {
+        Dynamic = 0,
+        Genre = 1,
+        Boxset = 2,
+        Custom = 3
+    }
+
     // Class for match-based collections (previously title-based only)
     public class TitleMatchPair
     {
@@ -83,6 +92,9 @@ namespace Jellyfin.Plugin.AutoCollections.Configuration
         public bool CaseSensitive { get; set; }
         public MatchType MatchType { get; set; }
         public MediaTypeFilter MediaType { get; set; }
+        public CollectionType CollectionType { get; set; }
+        public string SortName { get; set; }
+        public string Description { get; set; }
 
         // Add parameterless constructor for XML serialization
         public TitleMatchPair()
@@ -92,16 +104,24 @@ namespace Jellyfin.Plugin.AutoCollections.Configuration
             CaseSensitive = false; // Default to case insensitive
             MatchType = MatchType.Title; // Default to title matching for backward compatibility
             MediaType = MediaTypeFilter.All; // Default to include all media types
+            CollectionType = CollectionType.Dynamic;
+            SortName = string.Empty;
+            Description = string.Empty;
         }
 
         public TitleMatchPair(string titleMatch, string collectionName = null, bool caseSensitive = false, 
-                              MatchType matchType = MatchType.Title, MediaTypeFilter mediaType = MediaTypeFilter.All)
+                              MatchType matchType = MatchType.Title, MediaTypeFilter mediaType = MediaTypeFilter.All,
+                              CollectionType collectionType = CollectionType.Dynamic, string sortName = null,
+                              string description = null)
         {
             TitleMatch = titleMatch;
             CollectionName = collectionName ?? GetDefaultCollectionName(titleMatch, matchType);
             CaseSensitive = caseSensitive;
             MatchType = matchType;
             MediaType = mediaType;
+            CollectionType = collectionType;
+            SortName = sortName ?? string.Empty;
+            Description = description ?? string.Empty;
         }        private static string GetDefaultCollectionName(string matchString, MatchType matchType)
         {
             if (string.IsNullOrEmpty(matchString))

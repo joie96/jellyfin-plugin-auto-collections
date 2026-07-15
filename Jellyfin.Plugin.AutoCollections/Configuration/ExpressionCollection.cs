@@ -176,6 +176,9 @@ namespace Jellyfin.Plugin.AutoCollections.Configuration
         public string CollectionName { get; set; }
         public string Expression { get; set; }
         public bool CaseSensitive { get; set; }
+        public CollectionType CollectionType { get; set; }
+        public string SortName { get; set; }
+        public string Description { get; set; }
 
         // Make ParsedExpression and ParseErrors non-serializable
         [System.Xml.Serialization.XmlIgnore]
@@ -192,14 +195,26 @@ namespace Jellyfin.Plugin.AutoCollections.Configuration
             CollectionName = "Auto Collection";
             Expression = string.Empty;
             CaseSensitive = false;
+            CollectionType = CollectionType.Dynamic;
+            SortName = string.Empty;
+            Description = string.Empty;
             ParseErrors = new List<string>();
         }
 
-        public ExpressionCollection(string collectionName, string expression, bool caseSensitive = false)
+        public ExpressionCollection(
+            string collectionName,
+            string expression,
+            bool caseSensitive = false,
+            CollectionType collectionType = CollectionType.Dynamic,
+            string sortName = null,
+            string description = null)
         {
             CollectionName = collectionName;
             Expression = expression;
             CaseSensitive = caseSensitive;
+            CollectionType = collectionType;
+            SortName = sortName ?? string.Empty;
+            Description = description ?? string.Empty;
             ParseErrors = new List<string>();
 
             // Parse expression when created

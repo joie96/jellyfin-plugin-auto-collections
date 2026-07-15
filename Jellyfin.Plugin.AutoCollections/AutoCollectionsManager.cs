@@ -8,6 +8,7 @@ using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Net;
+using System.Globalization;
 using MediaBrowser.Common.Configuration;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Entities.TV;
@@ -19,6 +20,15 @@ using Jellyfin.Data.Enums;
 using MediaBrowser.Controller.Collections;
 using MediaBrowser.Controller.Providers;
 using Jellyfin.Plugin.AutoCollections.Configuration;
+using SixLabors.Fonts;
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.Drawing.Processing;
+using SixLabors.ImageSharp.Formats.Jpeg;
+using SixLabors.ImageSharp.PixelFormats;
+using SixLabors.ImageSharp.Processing;
+using SixLabors.ImageSharp.Processing.Processors.Transforms;
+using PointF = SixLabors.ImageSharp.PointF;
+using Color = SixLabors.ImageSharp.Color;
 
 namespace Jellyfin.Plugin.AutoCollections
 {
@@ -44,6 +54,34 @@ namespace Jellyfin.Plugin.AutoCollections
         private readonly Timer _timer;
         private readonly ILogger<AutoCollectionsManager> _logger;
         private readonly string _pluginDirectory;
+
+        private const int TargetWidth = 1920;
+        private const int TargetHeight = 1080;
+        private const int MaxSourceImages = 4;
+        private const int TopInsetEdgeHeight = 250;
+        private const int TopInsetCenterHeight = 310;
+        private const int TopInsetCurveSegments = 64;
+        private const int TileTrimTopBottom = TopInsetEdgeHeight / 6;
+
+        private static readonly Color TopInsetColor = Color.Black;
+        private static readonly Color TextColor = Color.White;
+
+        private static readonly string[] FontCandidates =
+        {
+            "Tahoma",
+            "Arial",
+            "DejaVu Sans",
+            "Liberation Sans",
+            "Noto Sans"
+        };
+
+        private static readonly Dictionary<Configuration.CollectionType, string> CollectionTypeLabels = new()
+        {
+            { Configuration.CollectionType.Dynamic, "Dynamisch" },
+            { Configuration.CollectionType.Genre, "Genre" },
+            { Configuration.CollectionType.Boxset, "Boxset" },
+            { Configuration.CollectionType.Custom, "Custom" }
+        };
         
         // Cache for person-to-media lookups during expression evaluation
         // Key: (personName, personType, caseSensitive), Value: HashSet of movie IDs
@@ -749,138 +787,314 @@ namespace Jellyfin.Plugin.AutoCollections
         // ================================================================
         // This section contains methods for setting collection images/photos
         // from various sources including persons and media items.
-        private async Task SetPhotoForCollection(BoxSet collection, Person? specificPerson = null)
+        private async Task ApplyCollectionMetadataAndThumb(
+            BoxSet collection,
+            string desiredName,
+            string desiredSortName,
+            string desiredDescription,
+            Configuration.CollectionType collectionType,
+            IReadOnlyList<BaseItem> mediaItems)
+        {
+            var safeName = (desiredName ?? string.Empty).Trim();
+            var safeSortName = string.IsNullOrWhiteSpace(desiredSortName)
+                ? safeName
+                : desiredSortName.Trim();
+            var safeDescription = (desiredDescription ?? string.Empty).Trim();
+
+            var metadataChanged = false;
+
+            if (!string.Equals(collection.Name ?? string.Empty, safeName, StringComparison.Ordinal))
+            {
+                collection.Name = safeName;
+                metadataChanged = true;
+            }
+
+            if (!string.Equals(collection.SortName ?? string.Empty, safeSortName, StringComparison.Ordinal))
+            {
+                collection.SortName = safeSortName;
+                metadataChanged = true;
+            }
+
+            if (!string.Equals(collection.Overview ?? string.Empty, safeDescription, StringComparison.Ordinal))
+            {
+                collection.Overview = safeDescription;
+                metadataChanged = true;
+            }
+
+            if (metadataChanged)
+            {
+                await _libraryManager.UpdateItemAsync(
+                    collection,
+                    collection.GetParent(),
+                    ItemUpdateType.ImageUpdate,
+                    CancellationToken.None);
+
+                _logger.LogInformation(
+                    "Updated metadata for collection {CollectionName}: SortName='{SortName}', Type={CollectionType}",
+                    safeName,
+                    safeSortName,
+                    collectionType);
+            }
+
+            await SetThumbForCollection(collection, mediaItems, collectionType).ConfigureAwait(true);
+        }
+
+        private async Task SetThumbForCollection(
+            BoxSet collection,
+            IReadOnlyList<BaseItem> mediaItems,
+            Configuration.CollectionType collectionType)
         {
             try
             {
-                // First attempt: Use the specific person if provided
-                if (specificPerson != null && specificPerson.ImageInfos != null)
+                if (mediaItems.Count == 0)
                 {
-                    var personImageInfo = specificPerson.ImageInfos
-                        .FirstOrDefault(i => i.Type == ImageType.Primary);
-
-                    if (personImageInfo != null)
-                    {
-                        // Set the image path directly
-                        collection.SetImage(new ItemImageInfo
-                        {
-                            Path = personImageInfo.Path,
-                            Type = ImageType.Primary
-                        }, 0);
-
-                        await _libraryManager.UpdateItemAsync(
-                            collection,
-                            collection.GetParent(),
-                            ItemUpdateType.ImageUpdate,
-                            CancellationToken.None);
-                        _logger.LogInformation("Successfully set image for collection {CollectionName} from specified person {PersonName}",
-                            collection.Name, specificPerson.Name);
-
-                        return; // We're done if we used the specified person's image
-                    }
+                    _logger.LogWarning("No media items available to build thumb for collection {CollectionName}", collection.Name);
+                    return;
                 }
 
-                // Second attempt: Try to determine the collection type and set appropriate image
-
-                // Get the collection's items to determine its nature
-                var query = new InternalItemsQuery
-                {
-                    Recursive = true
-                };
-
-                var items = collection.GetItems(query)
-                    .Items
+                var candidateItems = mediaItems
+                    .OrderBy(_ => Guid.NewGuid())
+                    .Take(MaxSourceImages)
                     .ToList();
 
-                _logger.LogDebug("Found {Count} items in collection {CollectionName}",
-                    items.Count, collection.Name);
-
-                // If no specific person was provided, but collection name suggests it's for a person,
-                // try to find that person
-                if (specificPerson == null)
+                var loadedImages = new List<Image<Rgb24>>();
+                foreach (var item in candidateItems)
                 {
-                    string term = collection.Name;
-
-                    // Check if this collection might be for a person (actor or director)
-                    var personQuery = new InternalItemsQuery
+                    var imagePath = GetPreferredImagePath(item);
+                    if (string.IsNullOrWhiteSpace(imagePath))
                     {
-                        IncludeItemTypes = new[] { BaseItemKind.Person },
-                        Name = term
-                    };
+                        continue;
+                    }
 
-                    var person = _libraryManager.GetItemList(personQuery)
-                        .FirstOrDefault(p =>
-                            p.Name.Equals(term, StringComparison.OrdinalIgnoreCase) &&
-                            p.ImageInfos != null &&
-                            p.ImageInfos.Any(i => i.Type == ImageType.Primary)) as Person;
-
-                    // If we found a person with an image, use their image
-                    if (person != null && person.ImageInfos != null)
+                    try
                     {
-                        var personImageInfo = person.ImageInfos
-                            .FirstOrDefault(i => i.Type == ImageType.Primary);
-
-                        if (personImageInfo != null)
+                        if (File.Exists(imagePath))
                         {
-                            // Set the image path directly
-                            collection.SetImage(new ItemImageInfo
-                            {
-                                Path = personImageInfo.Path,
-                                Type = ImageType.Primary
-                            }, 0);
-
-                            await _libraryManager.UpdateItemAsync(
-                                collection,
-                                collection.GetParent(),
-                                ItemUpdateType.ImageUpdate,
-                                CancellationToken.None);
-                            _logger.LogInformation("Successfully set image for collection {CollectionName} from detected person {PersonName}",
-                                collection.Name, person.Name);
-
-                            return; // We're done if we found a person image
+                            loadedImages.Add(Image.Load<Rgb24>(imagePath));
                         }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogDebug(ex, "Failed to load image '{ImagePath}' for item {ItemName}", imagePath, item.Name);
                     }
                 }
 
-                // Last fallback: Use an image from a movie/series in the collection
-                var mediaItemWithImage = items
-                    .Where(item => item is Movie || item is Series)
-                    .FirstOrDefault(item =>
-                        item.ImageInfos != null &&
-                        item.ImageInfos.Any(i => i.Type == ImageType.Primary));
-
-                if (mediaItemWithImage != null)
+                if (loadedImages.Count == 0)
                 {
-                    var imageInfo = mediaItemWithImage.ImageInfos
-                        .First(i => i.Type == ImageType.Primary);
-
-                    // Set the image path directly
-                    collection.SetImage(new ItemImageInfo
-                    {
-                        Path = imageInfo.Path,
-                        Type = ImageType.Primary
-                    }, 0);
-
-                    await _libraryManager.UpdateItemAsync(
-                        collection,
-                        collection.GetParent(),
-                        ItemUpdateType.ImageUpdate,
-                        CancellationToken.None);
-                    _logger.LogInformation("Successfully set image for collection {CollectionName} from {ItemName}",
-                        collection.Name, mediaItemWithImage.Name);
+                    _logger.LogWarning("Could not load source images for collection thumb {CollectionName}", collection.Name);
+                    return;
                 }
-                else
+
+                var thumbBytes = BuildCollectionThumb(loadedImages, collection.Name, collectionType);
+                foreach (var loaded in loadedImages)
                 {
-                    _logger.LogWarning("No items with images found in collection {CollectionName}. Items: {Items}",
-                        collection.Name,
-                        string.Join(", ", items.Select(i => i.Name)));
+                    loaded.Dispose();
                 }
+
+                if (thumbBytes == null || thumbBytes.Length == 0)
+                {
+                    _logger.LogWarning("Thumb rendering produced no output for collection {CollectionName}", collection.Name);
+                    return;
+                }
+
+                var thumbsDirectory = Path.Combine(_pluginDirectory, "thumbs");
+                Directory.CreateDirectory(thumbsDirectory);
+
+                var thumbPath = Path.Combine(thumbsDirectory, $"{collection.Id}_thumb.jpg");
+                await File.WriteAllBytesAsync(thumbPath, thumbBytes).ConfigureAwait(true);
+
+                collection.SetImage(new ItemImageInfo
+                {
+                    Path = thumbPath,
+                    Type = ImageType.Thumb
+                }, 0);
+
+                await _libraryManager.UpdateItemAsync(
+                    collection,
+                    collection.GetParent(),
+                    ItemUpdateType.ImageUpdate,
+                    CancellationToken.None);
+
+                _logger.LogInformation("Updated thumb image for collection {CollectionName}", collection.Name);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error setting image for collection {CollectionName}",
-                    collection.Name);
+                _logger.LogError(ex, "Error generating thumb for collection {CollectionName}", collection.Name);
             }
+        }
+
+        private string? GetPreferredImagePath(BaseItem item)
+        {
+            if (item.ImageInfos == null || !item.ImageInfos.Any())
+            {
+                return null;
+            }
+
+            var preferredOrder = new[] { ImageType.Thumb, ImageType.Primary, ImageType.Backdrop };
+            foreach (var type in preferredOrder)
+            {
+                var info = item.ImageInfos.FirstOrDefault(i => i.Type == type && !string.IsNullOrWhiteSpace(i.Path));
+                if (info != null)
+                {
+                    return info.Path;
+                }
+            }
+
+            return item.ImageInfos.FirstOrDefault(i => !string.IsNullOrWhiteSpace(i.Path))?.Path;
+        }
+
+        private byte[]? BuildCollectionThumb(
+            IReadOnlyList<Image<Rgb24>> sourceImages,
+            string primaryText,
+            Configuration.CollectionType collectionType)
+        {
+            if (sourceImages.Count == 0)
+            {
+                return null;
+            }
+
+            using var canvas = new Image<Rgb24>(TargetWidth, TargetHeight);
+            using (var background = ResizeAndCrop(sourceImages[0], TargetWidth, TargetHeight))
+            {
+                background.Mutate(ctx =>
+                {
+                    ctx.GaussianBlur(24f);
+                    ctx.Brightness(0.45f);
+                });
+
+                canvas.Mutate(ctx => ctx.DrawImage(background, 1f));
+            }
+
+            var images = sourceImages.Take(MaxSourceImages).ToList();
+            while (images.Count < MaxSourceImages)
+            {
+                images.Add(sourceImages[Random.Shared.Next(sourceImages.Count)]);
+            }
+
+            const int cols = 2;
+            const int rows = 2;
+            var tileWidth = TargetWidth / cols;
+            var tileHeight = (TargetHeight - TopInsetEdgeHeight) / rows;
+
+            for (var index = 0; index < MaxSourceImages; index++)
+            {
+                var col = index % cols;
+                var row = index / cols;
+                var x = col * tileWidth;
+                var y = TopInsetEdgeHeight + (row * tileHeight);
+
+                using var tile = FitTileWithVerticalTrim(images[index], tileWidth, tileHeight);
+                canvas.Mutate(ctx => ctx.DrawImage(tile, new Point(x, y), 1f));
+            }
+
+            var overlayPoints = BuildTopOverlayPoints();
+            var polygon = new SixLabors.ImageSharp.Drawing.Polygon(
+                new SixLabors.ImageSharp.Drawing.LinearLineSegment(overlayPoints));
+            canvas.Mutate(ctx => ctx.Fill(TopInsetColor, polygon));
+
+            var leftText = TruncateText(primaryText, 42);
+            var rightText = CollectionTypeLabels.TryGetValue(collectionType, out var label)
+                ? label
+                : collectionType.ToString();
+
+            var leftFont = CreateFont(86);
+            var rightFont = CreateFont(46);
+
+            canvas.Mutate(ctx =>
+            {
+                ctx.DrawText(leftText, leftFont, TextColor, new PointF(52f, 64f));
+
+                if (!string.IsNullOrWhiteSpace(rightText))
+                {
+                    var measure = TextMeasurer.MeasureSize(rightText, new TextOptions(rightFont));
+                    var x = TargetWidth - 52f - measure.Width;
+                    ctx.DrawText(rightText, rightFont, TextColor, new PointF(x, 82f));
+                }
+            });
+
+            using var output = new MemoryStream();
+            canvas.SaveAsJpeg(output, new JpegEncoder { Quality = 90 });
+            return output.ToArray();
+        }
+
+        private static string TruncateText(string value, int maxLength)
+        {
+            var clean = (value ?? string.Empty).Trim();
+            if (clean.Length <= maxLength)
+            {
+                return clean;
+            }
+
+            return clean.Substring(0, Math.Max(0, maxLength - 1)).TrimEnd() + "...";
+        }
+
+        private static Font CreateFont(float size)
+        {
+            foreach (var candidate in FontCandidates)
+            {
+                if (SystemFonts.TryGet(candidate, out var family))
+                {
+                    return family.CreateFont(size, FontStyle.Bold);
+                }
+            }
+
+            var fallback = SystemFonts.Collection.Families.First();
+            return fallback.CreateFont(size, FontStyle.Bold);
+        }
+
+        private static PointF[] BuildTopOverlayPoints()
+        {
+            var points = new List<PointF>
+            {
+                new(0f, 0f),
+                new(TargetWidth, 0f),
+                new(TargetWidth, TopInsetEdgeHeight)
+            };
+
+            var x0 = TargetWidth;
+            var y0 = TopInsetEdgeHeight;
+            var x1 = TargetWidth / 2f;
+            var y1 = TopInsetCenterHeight;
+            var x2 = 0f;
+            var y2 = TopInsetEdgeHeight;
+
+            for (var step = 0; step <= TopInsetCurveSegments; step++)
+            {
+                var t = step / (float)TopInsetCurveSegments;
+                var x = ((1 - t) * (1 - t) * x0) + (2 * (1 - t) * t * x1) + (t * t * x2);
+                var y = ((1 - t) * (1 - t) * y0) + (2 * (1 - t) * t * y1) + (t * t * y2);
+                points.Add(new PointF(x, y));
+            }
+
+            points.Add(new PointF(0f, 0f));
+            return points.ToArray();
+        }
+
+        private static Image<Rgb24> ResizeAndCrop(Image<Rgb24> image, int targetWidth, int targetHeight)
+        {
+            return image.Clone(ctx =>
+                ctx.Resize(new ResizeOptions
+                {
+                    Size = new Size(targetWidth, targetHeight),
+                    Mode = ResizeMode.Crop,
+                    Position = AnchorPositionMode.Center,
+                    Sampler = KnownResamplers.Lanczos3
+                }));
+        }
+
+        private static Image<Rgb24> FitTileWithVerticalTrim(Image<Rgb24> image, int tileWidth, int tileHeight)
+        {
+            var workHeight = Math.Max(1, tileHeight + (2 * TileTrimTopBottom));
+            var fitted = image.Clone(ctx =>
+                ctx.Resize(new ResizeOptions
+                {
+                    Size = new Size(tileWidth, workHeight),
+                    Mode = ResizeMode.Crop,
+                    Position = AnchorPositionMode.Center,
+                    Sampler = KnownResamplers.Lanczos3
+                }));
+
+            return fitted.Clone(ctx => ctx.Crop(new Rectangle(0, TileTrimTopBottom, tileWidth, tileHeight)));
         }
 
         // ================================================================
@@ -897,7 +1111,6 @@ namespace Jellyfin.Plugin.AutoCollections
             
             // Get or create the collection
             var collection = GetBoxSetByName(collectionName);
-            bool isNewCollection = false;
             if (collection is null)
             {
                 _logger.LogInformation("{Name} not found, creating.", collectionName);
@@ -907,7 +1120,6 @@ namespace Jellyfin.Plugin.AutoCollections
                     IsLocked = false
                 });
                 collection.Tags = new[] { "Autocollection" };
-                isNewCollection = true;
             }
             collection.DisplayOrder = "Default";
 
@@ -1036,16 +1248,13 @@ namespace Jellyfin.Plugin.AutoCollections
                 _logger.LogWarning("Could not re-fetch collection {CollectionName} for validation.", collection.Name);
             }
             
-            // Only set the photo for the collection if it's newly created
-            if (isNewCollection)
-            {
-                _logger.LogInformation("Setting image for newly created collection: {CollectionName}", collectionName);
-                await SetPhotoForCollection(collection, specificPerson);
-            }
-            else
-            {
-                _logger.LogInformation("Preserving existing image for collection: {CollectionName}", collectionName);
-            }
+            await ApplyCollectionMetadataAndThumb(
+                collection,
+                collectionName,
+                collectionName,
+                string.Empty,
+                Configuration.CollectionType.Dynamic,
+                mediaItems);
         }
 
         // ================================================================
@@ -1079,7 +1288,6 @@ namespace Jellyfin.Plugin.AutoCollections
             
             // Get or create the collection
             var collection = GetBoxSetByName(collectionName);
-            bool isNewCollection = false;
             if (collection == null)
             {
                 _logger.LogInformation("{Name} not found, creating.", collectionName);
@@ -1089,7 +1297,6 @@ namespace Jellyfin.Plugin.AutoCollections
                     IsLocked = false
                 });
                 collection.Tags = new[] { "Autocollection" };
-                isNewCollection = true;
             }
             collection.DisplayOrder = "Default";
               
@@ -1189,16 +1396,13 @@ namespace Jellyfin.Plugin.AutoCollections
                 _logger.LogWarning("Could not re-fetch collection {CollectionName} for validation.", collection.Name);
             }
             
-            // Only set the photo for the collection if it's newly created
-            if (isNewCollection && mediaItems.Count > 0)
-            {
-                _logger.LogInformation("Setting image for newly created collection: {CollectionName}", collectionName);
-                await SetPhotoForCollection(collection, null);
-            }
-            else
-            {
-                _logger.LogInformation("Preserving existing image for collection: {CollectionName}", collectionName);
-            }
+            await ApplyCollectionMetadataAndThumb(
+                collection,
+                collectionName,
+                titleMatchPair.SortName,
+                titleMatchPair.Description,
+                titleMatchPair.CollectionType,
+                mediaItems);
         }
 
         // ================================================================
@@ -1730,7 +1934,6 @@ namespace Jellyfin.Plugin.AutoCollections
             // Get or create the collection
             var collectionName = expressionCollection.CollectionName;
             var collection = GetBoxSetByName(collectionName);
-            bool isNewCollection = false;
             
             if (collection is null)
             {
@@ -1741,7 +1944,6 @@ namespace Jellyfin.Plugin.AutoCollections
                     IsLocked = false
                 });
                 collection.Tags = new[] { "Autocollection" };
-                isNewCollection = true;
             }
             collection.DisplayOrder = "Default";
             
@@ -1850,11 +2052,13 @@ namespace Jellyfin.Plugin.AutoCollections
                 _logger.LogWarning("Could not re-fetch expression collection {CollectionName} for validation.", collection.Name);
             }
             
-            // Set collection image if it's a new collection
-            if (isNewCollection && allMatchingItems.Count > 0)
-            {
-                await SetPhotoForCollection(collection);
-            }
+            await ApplyCollectionMetadataAndThumb(
+                collection,
+                collectionName,
+                expressionCollection.SortName,
+                expressionCollection.Description,
+                expressionCollection.CollectionType,
+                allMatchingItems);
         }
         
         // ================================================================

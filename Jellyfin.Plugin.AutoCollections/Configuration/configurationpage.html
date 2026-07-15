@@ -184,13 +184,50 @@
           </form>
         </div>
       </div>      <script type="text/javascript" defer>
+        function enumToValue(value, mapping, fallback = 0) {
+          if (typeof value === 'number') {
+            return value;
+          }
+
+          if (value !== undefined && Object.prototype.hasOwnProperty.call(mapping, value)) {
+            return mapping[value];
+          }
+
+          return fallback;
+        }
+
+        function valueToEnum(value, mapping, fallback) {
+          return Object.prototype.hasOwnProperty.call(mapping, value) ? mapping[value] : fallback;
+        }
+
+        const collectionTypeValueMap = {
+          Dynamic: 0,
+          Genre: 1,
+          Boxset: 2,
+          Custom: 3
+        };
+
+        const collectionTypeEnumMap = {
+          0: 'Dynamic',
+          1: 'Genre',
+          2: 'Boxset',
+          3: 'Custom'
+        };
+
         // For expression-based collections
-        function createExpressionCollectionElement(expression = '', collectionName = '', caseSensitive = false) {
+        function createExpressionCollectionElement(
+          expression = '',
+          collectionName = '',
+          caseSensitive = false,
+          collectionType = 0,
+          sortName = '',
+          description = ''
+        ) {
           const container = document.createElement('div');
           container.className = 'expression-container';
           container.style.display = 'flex';
           container.style.flexWrap = 'wrap';
-          container.style.alignItems = 'center';
+          container.style.alignItems = 'flex-start';
           container.style.padding = '8px';
           container.style.marginBottom = '10px';
           container.style.borderRadius = '4px';
@@ -225,6 +262,57 @@
           expressionInput.value = expression;
           
           expressionContainer.appendChild(expressionInput);
+
+          // Collection type dropdown
+          const collectionTypeContainer = document.createElement('div');
+          collectionTypeContainer.style.flex = '0 0 120px';
+          collectionTypeContainer.style.marginRight = '10px';
+
+          const collectionTypeSelect = document.createElement('select');
+          collectionTypeSelect.is = 'emby-select';
+          collectionTypeSelect.className = 'collection-type-select';
+
+          [
+            { value: '0', text: 'Dynamic' },
+            { value: '1', text: 'Genre' },
+            { value: '2', text: 'Boxset' },
+            { value: '3', text: 'Custom' }
+          ].forEach(opt => {
+            const option = document.createElement('option');
+            option.value = opt.value;
+            option.text = opt.text;
+            collectionTypeSelect.appendChild(option);
+          });
+          collectionTypeSelect.value = collectionType.toString();
+          collectionTypeContainer.appendChild(collectionTypeSelect);
+
+          // SortName input
+          const sortNameContainer = document.createElement('div');
+          sortNameContainer.style.flex = '1 1 200px';
+          sortNameContainer.style.marginRight = '10px';
+
+          const sortNameInput = document.createElement('input');
+          sortNameInput.is = 'emby-input';
+          sortNameInput.type = 'text';
+          sortNameInput.className = 'sort-name-input';
+          sortNameInput.style.width = '100%';
+          sortNameInput.placeholder = 'Sort Name (optional)';
+          sortNameInput.value = sortName;
+          sortNameContainer.appendChild(sortNameInput);
+
+          // Description input
+          const descriptionContainer = document.createElement('div');
+          descriptionContainer.style.flex = '1 1 260px';
+          descriptionContainer.style.marginRight = '10px';
+
+          const descriptionInput = document.createElement('input');
+          descriptionInput.is = 'emby-input';
+          descriptionInput.type = 'text';
+          descriptionInput.className = 'collection-description-input';
+          descriptionInput.style.width = '100%';
+          descriptionInput.placeholder = 'Description (optional)';
+          descriptionInput.value = description;
+          descriptionContainer.appendChild(descriptionInput);
           
           // Case-sensitive checkbox
           const caseCheckContainer = document.createElement('div');
@@ -252,6 +340,12 @@
           caseCheckboxWrapper.appendChild(caseCheckbox);
           caseCheckContainer.appendChild(caseCheckboxWrapper);
           caseCheckContainer.appendChild(caseLabel);
+
+          setTimeout(() => {
+            if (collectionTypeSelect.embyInit) {
+              collectionTypeSelect.embyInit();
+            }
+          }, 0);
           
           // Remove button
           const removeButton = document.createElement('button');
@@ -271,18 +365,30 @@
           // Add all components
           container.appendChild(collectionNameContainer);
           container.appendChild(expressionContainer);
+          container.appendChild(collectionTypeContainer);
+          container.appendChild(sortNameContainer);
+          container.appendChild(descriptionContainer);
           container.appendChild(caseCheckContainer);
           container.appendChild(removeButton);
           
           return container;
         }
         
-        function createTitleMatchPairElement(titleMatch = '', collectionName = '', caseSensitive = false, matchType = 0, mediaType = 0) {
+        function createTitleMatchPairElement(
+          titleMatch = '',
+          collectionName = '',
+          caseSensitive = false,
+          matchType = 0,
+          mediaType = 0,
+          collectionType = 0,
+          sortName = '',
+          description = ''
+        ) {
           const container = document.createElement('div');
           container.className = 'title-match-container';
           container.style.display = 'flex';
           container.style.flexWrap = 'wrap';
-          container.style.alignItems = 'center';
+          container.style.alignItems = 'flex-start';
           container.style.padding = '8px';
           container.style.marginBottom = '10px';
           container.style.borderRadius = '4px';
@@ -353,6 +459,32 @@
           }
           
           mediaTypeContainer.appendChild(mediaTypeSelect);
+
+          // Create collection type dropdown
+          const collectionTypeContainer = document.createElement('div');
+          collectionTypeContainer.className = 'collection-type-container';
+          collectionTypeContainer.style.marginRight = '10px';
+          collectionTypeContainer.style.minWidth = '110px';
+          collectionTypeContainer.style.flex = '0 0 110px';
+
+          const collectionTypeSelect = document.createElement('select');
+          collectionTypeSelect.is = 'emby-select';
+          collectionTypeSelect.className = 'collection-type-select';
+
+          [
+            { value: '0', text: 'Dynamic' },
+            { value: '1', text: 'Genre' },
+            { value: '2', text: 'Boxset' },
+            { value: '3', text: 'Custom' }
+          ].forEach(opt => {
+            const option = document.createElement('option');
+            option.value = opt.value;
+            option.text = opt.text;
+            collectionTypeSelect.appendChild(option);
+          });
+
+          collectionTypeSelect.value = collectionType.toString();
+          collectionTypeContainer.appendChild(collectionTypeSelect);
           
           // This ensures the Emby select components are properly initialized
           setTimeout(() => {
@@ -361,9 +493,13 @@
             }
             if (mediaTypeSelect.embyInit) {
               mediaTypeSelect.embyInit();
+            }
+            if (collectionTypeSelect.embyInit) {
+              collectionTypeSelect.embyInit();
             } else if (window.EmbyWebComponents && window.EmbyWebComponents.autoFocus) {
               window.EmbyWebComponents.autoFocus(matchTypeSelect.parentNode);
               window.EmbyWebComponents.autoFocus(mediaTypeSelect.parentNode);
+              window.EmbyWebComponents.autoFocus(collectionTypeSelect.parentNode);
             }
           }, 0);
             
@@ -426,6 +562,32 @@
           collectionNameInput.value = collectionName;
           
           collectionNameContainer.appendChild(collectionNameInput);
+
+          const sortNameContainer = document.createElement('div');
+          sortNameContainer.style.flex = '1 1 180px';
+          sortNameContainer.style.marginRight = '10px';
+
+          const sortNameInput = document.createElement('input');
+          sortNameInput.is = 'emby-input';
+          sortNameInput.type = 'text';
+          sortNameInput.className = 'sort-name-input';
+          sortNameInput.style.width = '100%';
+          sortNameInput.placeholder = 'Sort Name (optional)';
+          sortNameInput.value = sortName;
+          sortNameContainer.appendChild(sortNameInput);
+
+          const descriptionContainer = document.createElement('div');
+          descriptionContainer.style.flex = '1 1 260px';
+          descriptionContainer.style.marginRight = '10px';
+
+          const descriptionInput = document.createElement('input');
+          descriptionInput.is = 'emby-input';
+          descriptionInput.type = 'text';
+          descriptionInput.className = 'collection-description-input';
+          descriptionInput.style.width = '100%';
+          descriptionInput.placeholder = 'Description (optional)';
+          descriptionInput.value = description;
+          descriptionContainer.appendChild(descriptionInput);
             
           // Create case-sensitive checkbox
           const caseCheckContainer = document.createElement('div');
@@ -471,8 +633,11 @@
           // Add all components to container in order
           container.appendChild(matchTypeContainer);
           container.appendChild(mediaTypeContainer); // Add media type dropdown
+          container.appendChild(collectionTypeContainer);
           container.appendChild(titleMatchContainer);
           container.appendChild(collectionNameContainer);
+          container.appendChild(sortNameContainer);
+          container.appendChild(descriptionContainer);
           container.appendChild(caseCheckContainer);
           container.appendChild(removeButton);
           
@@ -490,60 +655,33 @@
               // Check if we have the TitleMatchPairs property
               if (config.TitleMatchPairs && config.TitleMatchPairs.length > 0) {
                 config.TitleMatchPairs.forEach(pair => {                  
-                  // Convert MatchType enum string to numeric value for the dropdown
-                  let matchTypeValue = 0; // Default to Title
-                  if (pair.MatchType !== undefined) {
-                    switch (pair.MatchType) {
-                      case "Title":
-                        matchTypeValue = 0;
-                        break;
-                      case "Genre":
-                        matchTypeValue = 1;
-                        break;
-                      case "Studio":
-                        matchTypeValue = 2;
-                        break;
-                      case "Actor":
-                        matchTypeValue = 3;
-                        break;
-                      case "Director":
-                        matchTypeValue = 4;
-                        break;
-                      // Fallback for numeric values (backward compatibility)
-                      default:
-                        if (typeof pair.MatchType === 'number') {
-                          matchTypeValue = pair.MatchType;
-                        }
-                    }
-                  }
+                  const matchTypeMap = {
+                    Title: 0,
+                    Genre: 1,
+                    Studio: 2,
+                    Actor: 3,
+                    Director: 4
+                  };
 
-                  // Convert MediaType enum to numeric value for the dropdown
-                  let mediaTypeValue = 0; // Default to All
-                  if (pair.MediaType !== undefined) {
-                    switch (pair.MediaType) {
-                      case "All":
-                        mediaTypeValue = 0;
-                        break;
-                      case "Movies":
-                        mediaTypeValue = 1;
-                        break;
-                      case "Series":
-                        mediaTypeValue = 2;
-                        break;
-                      // Fallback for numeric values (backward compatibility)
-                      default:
-                        if (typeof pair.MediaType === 'number') {
-                          mediaTypeValue = pair.MediaType;
-                        }
-                    }
-                  }
+                  const mediaTypeMap = {
+                    All: 0,
+                    Movies: 1,
+                    Series: 2
+                  };
+
+                  const matchTypeValue = enumToValue(pair.MatchType, matchTypeMap, 0);
+                  const mediaTypeValue = enumToValue(pair.MediaType, mediaTypeMap, 0);
+                  const collectionTypeValue = enumToValue(pair.CollectionType, collectionTypeValueMap, 0);
                   
                   const element = createTitleMatchPairElement(
                     pair.TitleMatch, 
                     pair.CollectionName, 
                     pair.CaseSensitive, 
                     matchTypeValue,
-                    mediaTypeValue
+                    mediaTypeValue,
+                    collectionTypeValue,
+                    pair.SortName || '',
+                    pair.Description || ''
                   );
                   titleMatchPairsContainer.appendChild(element);
                 });
@@ -563,10 +701,14 @@
               // Check if we have the ExpressionCollections property
               if (config.ExpressionCollections && config.ExpressionCollections.length > 0) {
                 config.ExpressionCollections.forEach(collection => {
+                  const collectionTypeValue = enumToValue(collection.CollectionType, collectionTypeValueMap, 0);
                   const element = createExpressionCollectionElement(
                     collection.Expression,
                     collection.CollectionName,
-                    collection.CaseSensitive
+                    collection.CaseSensitive,
+                    collectionTypeValue,
+                    collection.SortName || '',
+                    collection.Description || ''
                   );
                   expressionCollectionsContainer.appendChild(element);
                 });
@@ -613,12 +755,17 @@
             // Handle our new nested structure
             const titleMatchInput = container.querySelector('.title-match-input');
             const collectionNameInput = container.querySelector('.collection-name-input');
+            const sortNameInput = container.querySelector('.sort-name-input');
+            const descriptionInput = container.querySelector('.collection-description-input');
             const caseSensitiveCheckbox = container.querySelector('.case-sensitive-checkbox');
             const matchTypeSelect = container.querySelector('.match-type-select');
             const mediaTypeSelect = container.querySelector('.media-type-select');
+            const collectionTypeSelect = container.querySelector('.collection-type-select');
               if (titleMatchInput.value.trim()) {
               const titleMatch = titleMatchInput.value.trim();
               const collectionName = collectionNameInput.value.trim();
+              const sortName = sortNameInput.value.trim();
+              const description = descriptionInput.value.trim();
               const caseSensitive = caseSensitiveCheckbox.checked;
               // Convert numeric value to enum string representation
               const matchTypeValue = parseInt(matchTypeSelect.value, 10);
@@ -660,13 +807,19 @@
                 default:
                   mediaTypeString = "All";
               }
+
+              const collectionTypeValue = parseInt(collectionTypeSelect.value, 10);
+              const collectionTypeString = valueToEnum(collectionTypeValue, collectionTypeEnumMap, 'Dynamic');
               
               titleMatchPairs.push({
                 TitleMatch: titleMatch,
                 CollectionName: collectionName || null, // Use null if collection name is empty
                 CaseSensitive: caseSensitive,
                 MatchType: matchTypeString,
-                MediaType: mediaTypeString
+                MediaType: mediaTypeString,
+                CollectionType: collectionTypeString,
+                SortName: sortName || '',
+                Description: description || ''
               });
             }
           });
@@ -676,13 +829,22 @@
           allExpressionContainers.forEach(container => {
             const expressionInput = container.querySelector('.expression-input');
             const collectionNameInput = container.querySelector('.collection-name-input');
+            const sortNameInput = container.querySelector('.sort-name-input');
+            const descriptionInput = container.querySelector('.collection-description-input');
+            const collectionTypeSelect = container.querySelector('.collection-type-select');
             const caseSensitiveCheckbox = container.querySelector('.case-sensitive-checkbox');
             
             if (expressionInput.value.trim()) {
+              const collectionTypeValue = parseInt(collectionTypeSelect.value, 10);
+              const collectionTypeString = valueToEnum(collectionTypeValue, collectionTypeEnumMap, 'Dynamic');
+
               expressionCollections.push({
                 Expression: expressionInput.value.trim(),
                 CollectionName: collectionNameInput.value.trim() || "Expression Collection",
-                CaseSensitive: caseSensitiveCheckbox.checked
+                CaseSensitive: caseSensitiveCheckbox.checked,
+                CollectionType: collectionTypeString,
+                SortName: sortNameInput.value.trim() || '',
+                Description: descriptionInput.value.trim() || ''
               });
             }
           });
