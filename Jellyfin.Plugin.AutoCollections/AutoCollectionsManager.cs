@@ -62,6 +62,10 @@ namespace Jellyfin.Plugin.AutoCollections
         private const int TopInsetCenterHeight = 310;
         private const int TopInsetCurveSegments = 64;
         private const int TileTrimTopBottom = TopInsetEdgeHeight / 6;
+        private const float LeftTextX = 52f;
+        private const float LeftTextY = 76f;
+        private const float RightTextXOffset = 52f;
+        private const float RightTextY = 94f;
 
         private static readonly Color TopInsetColor = Color.Black;
         private static readonly Color TextColor = Color.White;
@@ -821,6 +825,13 @@ namespace Jellyfin.Plugin.AutoCollections
                 metadataChanged = true;
             }
 
+            // Prevent Jellyfin from showing an inherited/random year on generated collections.
+            if (collection.ProductionYear.HasValue)
+            {
+                collection.ProductionYear = null;
+                metadataChanged = true;
+            }
+
             if (metadataChanged)
             {
                 await _libraryManager.UpdateItemAsync(
@@ -907,6 +918,12 @@ namespace Jellyfin.Plugin.AutoCollections
                 {
                     Path = thumbPath,
                     Type = ImageType.Thumb
+                }, 0);
+
+                collection.SetImage(new ItemImageInfo
+                {
+                    Path = thumbPath,
+                    Type = ImageType.Primary
                 }, 0);
 
                 await _libraryManager.UpdateItemAsync(
@@ -1002,13 +1019,13 @@ namespace Jellyfin.Plugin.AutoCollections
 
             canvas.Mutate(ctx =>
             {
-                ctx.DrawText(leftText, leftFont, TextColor, new PointF(52f, 64f));
+                ctx.DrawText(leftText, leftFont, TextColor, new PointF(LeftTextX, LeftTextY));
 
                 if (!string.IsNullOrWhiteSpace(rightText))
                 {
                     var measure = TextMeasurer.MeasureSize(rightText, new TextOptions(rightFont));
-                    var x = TargetWidth - 52f - measure.Width;
-                    ctx.DrawText(rightText, rightFont, TextColor, new PointF(x, 82f));
+                    var x = TargetWidth - RightTextXOffset - measure.Width;
+                    ctx.DrawText(rightText, rightFont, TextColor, new PointF(x, RightTextY));
                 }
             });
 

@@ -1,7 +1,7 @@
 ---
 name: "jellyfin-plugin-auto-collections"
 guid: "45728cd1-8334-4d13-a046-71bc87a0a37e"
-version: "0.0.4.4" # Please increment with each pull request
+version: "0.0.4.5" # Please increment with each pull request
 jellyfin_version: "10.5.0" # The earliest binary-compatible version
 owner: "jellyfin"
 nicename: "Auto Collections"
