@@ -167,8 +167,8 @@ Day-based comparisons for temporal criteria:
 ## 🚀 Installation
 
 1. In Jellyfin, go to `Dashboard -> Plugins -> Catalog`
-2. Add repository: `@KeksBombe (Auto Collections)`
-3. Repository URL: `https://raw.githubusercontent.com/KeksBombe/jellyfin-plugin-auto-collections/refs/heads/main/manifest.json`
+2. Add repository: `@joie96 (Auto Collections)`
+3. Repository URL: `https://raw.githubusercontent.com/joie96/jellyfin-plugin-auto-collections/refs/heads/main/manifest.json`
 4. Click "Save"
 5. Search for "Auto Collections" and install
 6. Restart Jellyfin
@@ -348,7 +348,7 @@ This project maintains the same license as the original Smart Collections plugin
 ## 🙏 Credits
 
 - **Original Plugin**: [johnpc/jellyfin-plugin-smart-collections](https://github.com/johnpc/jellyfin-plugin-smart-collections)
-- **Enhanced Fork**: [KeksBombe/jellyfin-plugin-auto-collections](https://github.com/KeksBombe/jellyfin-plugin-auto-collections)
+- **Enhanced Fork**: [joie96/jellyfin-plugin-auto-collections](https://github.com/joie96/jellyfin-plugin-auto-collections)
 - **Community**: Thanks to all contributors and users
 
 ---
