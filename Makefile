@@ -1,4 +1,4 @@
-export VERSION := 0.0.4.3
+export VERSION := 0.0.4.4
 export GITHUB_REPO := joie96/jellyfin-plugin-auto-collections
 export FILE := auto-collections-${VERSION}.zip
 
@@ -6,7 +6,11 @@ build:
 	dotnet build
 
 zip:
-	zip "${FILE}" Jellyfin.Plugin.AutoCollections/bin/Debug/net9.0/Jellyfin.Plugin.AutoCollections.dll
+	zip "${FILE}" \
+		Jellyfin.Plugin.AutoCollections/bin/Release/net9.0/Jellyfin.Plugin.AutoCollections.dll \
+		Jellyfin.Plugin.AutoCollections/bin/Release/net9.0/SixLabors.ImageSharp.dll \
+		Jellyfin.Plugin.AutoCollections/bin/Release/net9.0/SixLabors.ImageSharp.Drawing.dll \
+		Jellyfin.Plugin.AutoCollections/bin/Release/net9.0/SixLabors.Fonts.dll
 
 csum:
 	md5sum "${FILE} ""
