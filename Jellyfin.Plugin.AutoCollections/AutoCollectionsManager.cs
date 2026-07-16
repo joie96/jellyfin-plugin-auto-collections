@@ -819,6 +819,18 @@ namespace Jellyfin.Plugin.AutoCollections
                 metadataChanged = true;
             }
 
+            // Jellyfin UI writes ForcedSortName; mirror that behavior for deterministic sorting.
+            var forcedSortNameProperty = collection.GetType().GetProperty("ForcedSortName");
+            if (forcedSortNameProperty != null && forcedSortNameProperty.PropertyType == typeof(string))
+            {
+                var currentForcedSortName = forcedSortNameProperty.GetValue(collection) as string ?? string.Empty;
+                if (!string.Equals(currentForcedSortName, safeSortName, StringComparison.Ordinal))
+                {
+                    forcedSortNameProperty.SetValue(collection, safeSortName);
+                    metadataChanged = true;
+                }
+            }
+
             if (!string.Equals(collection.Overview ?? string.Empty, safeDescription, StringComparison.Ordinal))
             {
                 collection.Overview = safeDescription;
@@ -837,7 +849,7 @@ namespace Jellyfin.Plugin.AutoCollections
                 await _libraryManager.UpdateItemAsync(
                     collection,
                     collection.GetParent(),
-                    ItemUpdateType.ImageUpdate,
+                    ItemUpdateType.MetadataEdit,
                     CancellationToken.None);
 
                 _logger.LogInformation(
@@ -868,7 +880,8 @@ namespace Jellyfin.Plugin.AutoCollections
                     .Take(MaxSourceImages)
                     .ToList();
 
-                var loadedImages = new List<Image<Rgb24>>();
+                var thumbImages = new List<Image<Rgb24>>();
+                var backdropImages = new List<Image<Rgb24>>();
                 foreach (var item in candidateItems)
                 {
                     var imagePath = GetPreferredImagePath(item);
@@ -881,7 +894,19 @@ namespace Jellyfin.Plugin.AutoCollections
                     {
                         if (File.Exists(imagePath))
                         {
-                            loadedImages.Add(Image.Load<Rgb24>(imagePath));
+                            var thumbImage = Image.Load<Rgb24>(imagePath);
+                            thumbImages.Add(thumbImage);
+
+                            var backdropPath = GetBackdropImagePath(item);
+                            if (!string.IsNullOrWhiteSpace(backdropPath) && File.Exists(backdropPath))
+                            {
+                                backdropImages.Add(Image.Load<Rgb24>(backdropPath));
+                            }
+                            else
+                            {
+                                // Keep order aligned with thumb tiles even when backdrop is missing.
+                                backdropImages.Add(thumbImage.Clone());
+                            }
                         }
                     }
                     catch (Exception ex)
@@ -890,14 +915,21 @@ namespace Jellyfin.Plugin.AutoCollections
                     }
                 }
 
-                if (loadedImages.Count == 0)
+                if (thumbImages.Count == 0)
                 {
                     _logger.LogWarning("Could not load source images for collection thumb {CollectionName}", collection.Name);
                     return;
                 }
 
-                var thumbBytes = BuildCollectionThumb(loadedImages, collection.Name, collectionType);
-                foreach (var loaded in loadedImages)
+                var thumbBytes = BuildCollectionThumb(thumbImages, collection.Name, collectionType);
+                var backdropBytes = BuildCollectionBackdrop(backdropImages);
+
+                foreach (var loaded in thumbImages)
+                {
+                    loaded.Dispose();
+                }
+
+                foreach (var loaded in backdropImages)
                 {
                     loaded.Dispose();
                 }
@@ -925,6 +957,18 @@ namespace Jellyfin.Plugin.AutoCollections
                     Path = thumbPath,
                     Type = ImageType.Primary
                 }, 0);
+
+                if (backdropBytes != null && backdropBytes.Length > 0)
+                {
+                    var backdropPath = Path.Combine(thumbsDirectory, $"{collection.Id}_backdrop.jpg");
+                    await File.WriteAllBytesAsync(backdropPath, backdropBytes).ConfigureAwait(true);
+
+                    collection.SetImage(new ItemImageInfo
+                    {
+                        Path = backdropPath,
+                        Type = ImageType.Backdrop
+                    }, 0);
+                }
 
                 await _libraryManager.UpdateItemAsync(
                     collection,
@@ -958,6 +1002,18 @@ namespace Jellyfin.Plugin.AutoCollections
             }
 
             return item.ImageInfos.FirstOrDefault(i => !string.IsNullOrWhiteSpace(i.Path))?.Path;
+        }
+
+        private string? GetBackdropImagePath(BaseItem item)
+        {
+            if (item.ImageInfos == null || !item.ImageInfos.Any())
+            {
+                return null;
+            }
+
+            return item.ImageInfos
+                .FirstOrDefault(i => i.Type == ImageType.Backdrop && !string.IsNullOrWhiteSpace(i.Path))
+                ?.Path;
         }
 
         private byte[]? BuildCollectionThumb(
@@ -1028,6 +1084,42 @@ namespace Jellyfin.Plugin.AutoCollections
                     ctx.DrawText(rightText, rightFont, TextColor, new PointF(x, RightTextY));
                 }
             });
+
+            using var output = new MemoryStream();
+            canvas.SaveAsJpeg(output, new JpegEncoder { Quality = 90 });
+            return output.ToArray();
+        }
+
+        private byte[]? BuildCollectionBackdrop(IReadOnlyList<Image<Rgb24>> sourceImages)
+        {
+            if (sourceImages.Count == 0)
+            {
+                return null;
+            }
+
+            using var canvas = new Image<Rgb24>(TargetWidth, TargetHeight);
+
+            var images = sourceImages.Take(MaxSourceImages).ToList();
+            while (images.Count < MaxSourceImages)
+            {
+                images.Add(sourceImages[Random.Shared.Next(sourceImages.Count)]);
+            }
+
+            const int cols = 2;
+            const int rows = 2;
+            var tileWidth = TargetWidth / cols;
+            var tileHeight = TargetHeight / rows;
+
+            for (var index = 0; index < MaxSourceImages; index++)
+            {
+                var col = index % cols;
+                var row = index / cols;
+                var x = col * tileWidth;
+                var y = row * tileHeight;
+
+                using var tile = ResizeAndCrop(images[index], tileWidth, tileHeight);
+                canvas.Mutate(ctx => ctx.DrawImage(tile, new Point(x, y), 1f));
+            }
 
             using var output = new MemoryStream();
             canvas.SaveAsJpeg(output, new JpegEncoder { Quality = 90 });
