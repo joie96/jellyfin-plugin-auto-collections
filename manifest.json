@@ -9,6 +9,14 @@
         "category": "General",
         "versions": [
             {
+                "version": "0.0.4.6",
+                "changelog": "- See the full changelog at [GitHub](https://github.com/joie96/jellyfin-plugin-auto-collections/releases/tag/0.0.4.6)\n",
+                "targetAbi": "10.11.0.0",
+                "sourceUrl": "https://github.com/joie96/jellyfin-plugin-auto-collections/releases/download/0.0.4.6/auto-collections-0.0.4.6.zip",
+                "checksum": "496152aaa851de1f338219d9791c3202",
+                "timestamp": "2026-07-16T15:08:19Z"
+            },
+            {
                 "version": "0.0.4.5",
                 "changelog": "- See the full changelog at [GitHub](https://github.com/joie96/jellyfin-plugin-auto-collections/releases/tag/0.0.4.5)\n",
                 "targetAbi": "10.11.0.0",
